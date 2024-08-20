@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drug Target Verification</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+        integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous" />
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"></script>
+    <script defer src="https://use.fontawesome.com/releases/v5.7.2/js/all.js"
+        integrity="sha384-0pzryjIRos8mFBWMzSSZApWtPl/5++eIfzYmTgBBmXYdhvxPc+XcFEk+zJwDgWbP"
+        crossorigin="anonymous"></script>
+</head>
+
+<body>
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                Drug Target Verification
+            </a>
+        </div>
+    </nav>
+
+    <div class="container-fluid bg-light" style="min-height: 100vh">
+        <div class="container pt-4">
+            <div class="jumbotron">
+                <div class="input-group mb-3">
+                    <input id="drug" type="text" class="form-control" placeholder="Enter a Drug name"
+                        aria-label="Drug name" aria-describedby="basic-addon1">
+                </div>
+
+                <div class="input-group mb-3">
+                    <input id="protein" type="text" class="form-control"
+                        placeholder="Enter Protein names (comma separated)" aria-label="Recipient's username"
+                        aria-describedby="basic-addon2">
+                </div>
+                <div class="input-group mb-3 justify-content-between">
+                    <button class="btn btn-outline-primary" type="button" id="button-addon2" onclick="addInteraction()">
+                        Add Interaction</button>
+                    <button class="btn btn-outline-success" type="button" id="button-addon2"
+                        onclick="submitInteractions()">
+                        Submit Interactions</button>
+                </div>
+            </div>
+
+            <!-- input list here -->
+            <div>
+                <ul class="displayList list-group">
+                </ul>
+            </div>
+        </div>
+
+        <!-- result list here -->
+        <div class="container pt-4">
+            <div id="results" class="mt-5">
+                <!-- <h3>Top Proteins Prioritised by Centrality</h3><ul id="result" class="list-group"><li class="list-group-item">P</li></ul> -->
+            </div>
+        </div>
+
+        <!-- graph here -->
+        <div id="graphCont" class="container p-4 d-flex justify-content-center">
+            <div id="graph"></div>
+        </div>
+    </div>
+
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+        let interactions = [];
+
+        function addInteraction() {
+            const drug = document.getElementById('drug').value;
+            const proteins = document.getElementById('protein').value.split(',');
+            interactions.push({ drug, proteins });
+            document.getElementById('drug').value = '';
+            document.getElementById('protein').value = '';
+            let injectedCode = codeInteraction(drug, proteins)
+            document.querySelector(".displayList").insertAdjacentHTML("beforeend", injectedCode)
+        }
+
+        function codeInteraction(drug, proteins) {
+            return `<li class="list-group-item d-flex justify-content-between" data-drug="${drug}">
+                <div class="d-flex flex-column">
+                    ${drug}
+                </div>
+                <div>
+                    <i>interacts with</i>
+                </div>
+                <div>
+                    <span class="px-5">
+                        ${proteins}
+                    </span>
+                    <button onclick="deleteInteraction(this)" type="button" class="btn btn-outline-danger btn-sm">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </div>
+            </li>`
+        }
+
+        function deleteInteraction(btn) {
+            let li = btn.closest('li');
+            let drug = li.getAttribute('data-drug');
+            let idx = interactions.findIndex(interaction => interaction.drug === drug);
+            if (idx > -1) {
+                interactions.splice(idx, 1); // Remove the interaction from the array
+            }
+            li.remove();
+        }
+
+        function submitInteractions() {
+            interactions = interactions.map(interaction => {
+                return {
+                    drug: interaction.drug.trim(), // Trim whitespaces
+                    proteins: interaction.proteins.map(protein => protein.trim()) // Trim whitespaces
+                };
+            });
+            fetch('/api/centrality', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ interactions })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    displayResults(data.sortedProteins);
+                    visualizeCentrality(data);
+                })
+                .catch(error => console.error('Error:', error));
+        }
+
+        function displayResults(proteinCentrality) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<h2>Top Proteins Prioritised by Number of Interactions</h2><ul id="result" class="list-group"></ul>';
+            Object.keys(proteinCentrality).forEach(protein => {
+                const resultList = document.getElementById('result');
+                const proteinElement = document.createElement('li');
+                proteinElement.textContent = protein + ` - ${proteinCentrality[protein]}`;
+                proteinElement.setAttribute("class", "list-group-item")
+                resultList.appendChild(proteinElement);
+            });
+        }
+
+        function visualizeCentrality({ drugCentrality, sortedProteins }) {
+            const nodes = [], links = [];
+            console.log(drugCentrality);
+            console.log(sortedProteins);
+            for (let drug in drugCentrality) {
+                nodes.push({ id: drug, group: 1, size: drugCentrality[drug] });
+            }
+
+            for (let protein in sortedProteins) {
+                nodes.push({ id: protein, group: 2, size: sortedProteins[protein] });
+            }
+
+            interactions.forEach(({ drug, proteins }) => {
+                proteins.forEach(protein => {
+                    links.push({ source: drug, target: protein });
+                });
+            });
+
+
+            // Adjust the width and height for a smaller container
+            const containerWidth = document.getElementById('graphCont').offsetWidth;
+            const width = containerWidth > 700 ? 600 : containerWidth - 50; // Limit max width to 800
+            const height = 400;
+
+            const svg = d3.select("#graph").html("").append("svg")
+                .attr("width", width)
+                .attr("height", height)
+                .attr("viewBox", `0 0 ${width} ${height}`)
+                .attr("preserveAspectRatio", "xMidYMid meet")
+                .style("border", "1px solid #ccc")
+                .style("background-color", "#f0f4f8") // Light background color
+                .call(d3.zoom().on("zoom", function (event) {
+                    svg.attr("transform", event.transform);
+                }))
+                .append("g");
+
+            const leftNodes = nodes.filter(d => d.group === 1);
+            const rightNodes = nodes.filter(d => d.group === 2);
+
+            const nodeYSpacing = height / Math.max(leftNodes.length, rightNodes.length);
+
+            leftNodes.forEach((d, i) => {
+                d.x = width * 0.25;
+                d.y = (i + 1) * nodeYSpacing;
+            });
+
+            rightNodes.forEach((d, i) => {
+                d.x = width * 0.75;
+                d.y = (i + 1) * nodeYSpacing;
+            });
+
+            const link = svg.append("g")
+                .attr("class", "links")
+                .selectAll("line")
+                .data(links)
+                .enter().append("line")
+                .attr("class", "link")
+                .attr("stroke-width", 2)
+                .attr("stroke", "#999");
+
+            const node = svg.append("g")
+                .attr("class", "nodes")
+                .selectAll("circle")
+                .data(nodes)
+                .enter().append("circle")
+                .attr("class", "node")
+                .attr("r", d => d.size * 4)
+                .attr("fill", d => d.group === 1 ? "blue" : "green");
+
+            const labels = svg.append("g")
+                .attr("class", "labels")
+                .selectAll(".label")
+                .data(nodes)
+                .enter().append("text")
+                .attr("class", "label")
+                .attr("dy", 5)
+                .attr("text-anchor", d => d.group === 1 ? "end" : "start")
+                .attr("x", d => d.group === 1 ? -12 : 12)
+                .attr("fill", "black") // Black text
+                .text(d => d.id);
+
+            link.attr("x1", d => nodes.find(n => n.id === d.source).x)
+                .attr("y1", d => nodes.find(n => n.id === d.source).y)
+                .attr("x2", d => nodes.find(n => n.id === d.target).x)
+                .attr("y2", d => nodes.find(n => n.id === d.target).y);
+
+            node.attr("cx", d => d.x)
+                .attr("cy", d => d.y);
+
+            labels.attr("transform", d => `translate(${d.x},${d.y})`);
+        }
+    </script>
+</body>
+
+</html>
